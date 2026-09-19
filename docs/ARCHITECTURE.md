@@ -2,7 +2,7 @@
 
 ## Overview
 
-Email Dispatcher is a high-throughput, concurrent email campaign delivery system built in Go. It reads recipient data from a CSV file, constructs personalized email jobs, and dispatches them through a pool of concurrent workers using Go's native concurrency primitives (goroutines and channels).
+**MailPunk** is a high-throughput, concurrent email campaign delivery system built in Go. It reads recipient data from a CSV file, constructs personalized email jobs, and dispatches them through a pool of concurrent workers using Go's native concurrency primitives (goroutines and channels).
 
 The system follows a **Producer → Channel → Worker Pool → Rate Limiter & Retry → Sender** architecture, enabling efficient parallel delivery with configurable concurrency, a shared token-bucket rate limiter, independent retry backoff on failure, and a swappable delivery interface supporting both production SMTP and high-speed mock benchmarking.
 

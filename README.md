@@ -1,4 +1,4 @@
-# 📧 Email Campaign Manager (Email Dispatcher)
+# ⚡ MailPunk
 
 A high-throughput, concurrent email campaign delivery system built in Go. Reads recipients from a CSV file, constructs personalized email jobs, and dispatches them through a configurable worker pool using Go's native concurrency primitives (goroutines, channels, and atomic synchronization) — featuring a shared token-bucket rate limiter, configurable retry system with backoff, swappable sender interface, and an integrated performance benchmark suite.
 
@@ -6,7 +6,7 @@ A high-throughput, concurrent email campaign delivery system built in Go. Reads 
 
 ## Overview
 
-Sending bulk email sequentially is slow and vulnerable to rate-limiting and intermittent network failures. The Email Campaign Manager provides a robust **Producer → Channel → Worker Pool → Rate Limiter & Retry → Sender** architecture that delivers emails in parallel while strictly adhering to external SMTP sending quotas.
+Sending bulk email sequentially is slow and vulnerable to rate-limiting and intermittent network failures. **MailPunk** provides a robust **Producer → Channel → Worker Pool → Rate Limiter & Retry → Sender** architecture that delivers emails in parallel while strictly adhering to external SMTP sending quotas.
 
 ### Key Features
 

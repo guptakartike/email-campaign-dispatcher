@@ -1,6 +1,6 @@
 # Roadmap
 
-Implementation roadmap for the Email Dispatcher, ordered by dependency and priority.
+Implementation roadmap for **MailPunk**, ordered by dependency and priority.
 
 ---
 
@@ -160,7 +160,7 @@ Features that extend the system into enterprise production deployments.
 
 ```mermaid
 gantt
-    title Email Dispatcher — Implementation Roadmap
+    title MailPunk — Implementation Roadmap
     dateFormat YYYY-MM-DD
     axisFormat %b %d
 

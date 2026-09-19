@@ -1,6 +1,6 @@
 # Development Plan
 
-A phased development plan and progress record for the Email Dispatcher — from initial CSV loading to full concurrent dispatch, rate limiting, and performance benchmarking.
+A phased development plan and progress record for **MailPunk** — from initial CSV loading to full concurrent dispatch, rate limiting, and performance benchmarking.
 
 ---
 

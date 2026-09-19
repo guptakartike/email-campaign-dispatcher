@@ -14,7 +14,7 @@ func main() {
 	dispatcher.Verbose = false
 
 	fmt.Println("========================================")
-	fmt.Println(" Email Campaign Manager Performance Benchmark")
+	fmt.Println("       MailPunk Performance Benchmark")
 	fmt.Println("========================================")
 	fmt.Printf("Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
 
