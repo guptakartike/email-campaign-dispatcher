@@ -58,7 +58,8 @@ func main() {
 
 	// Step 5: Start worker pool and wait for completion.
 	fmt.Printf("Starting %d workers...\n\n", workerCount)
-	dispatcher.StartWorkers(jobs, workerCount, cfg, retryCfg, limiter)
+	smtpSender := sender.NewSMTPSender(cfg)
+	dispatcher.StartWorkers(jobs, workerCount, smtpSender, retryCfg, limiter)
 
 	fmt.Println("\nAll jobs processed.")
 }

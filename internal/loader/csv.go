@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/guptakartike/email-dispatcher/internal/models"
 )
@@ -29,6 +30,22 @@ func LoadRecipients(filename string) ([]models.Recipient, error) {
 		return nil, fmt.Errorf("CSV header must have at least 2 columns, got %d", len(header))
 	}
 
+	// Determine column indices based on header names.
+	emailIdx := -1
+	nameIdx := -1
+	for idx, col := range header {
+		clean := strings.ToLower(strings.TrimSpace(col))
+		if clean == "email" {
+			emailIdx = idx
+		} else if clean == "name" {
+			nameIdx = idx
+		}
+	}
+	if emailIdx == -1 || nameIdx == -1 {
+		emailIdx = 0
+		nameIdx = 1
+	}
+
 	// Read all remaining rows.
 	rows, err := reader.ReadAll()
 	if err != nil {
@@ -41,8 +58,8 @@ func LoadRecipients(filename string) ([]models.Recipient, error) {
 			return nil, fmt.Errorf("row %d: expected at least 2 columns, got %d", i+2, len(row))
 		}
 		recipients = append(recipients, models.Recipient{
-			Email: row[0],
-			Name:  row[1],
+			Email: strings.TrimSpace(row[emailIdx]),
+			Name:  strings.TrimSpace(row[nameIdx]),
 		})
 	}
 

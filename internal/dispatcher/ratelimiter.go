@@ -25,12 +25,19 @@ func NewRateLimiter(emailsPerSecond float64) *RateLimiter {
 }
 
 // Wait blocks until the rate limiter allows the next send.
+// If rl is nil, it returns immediately without waiting (bypassed).
 // It is safe to call from multiple goroutines.
 func (rl *RateLimiter) Wait() {
+	if rl == nil || rl.ticker == nil {
+		return
+	}
 	<-rl.ticker.C
 }
 
 // Stop releases the underlying ticker resources.
 func (rl *RateLimiter) Stop() {
+	if rl == nil || rl.ticker == nil {
+		return
+	}
 	rl.ticker.Stop()
 }
