@@ -36,6 +36,7 @@ func main() {
 	}
 
 	retryCfg := loadRetryConfig()
+	emailsPerSecond := loadRateLimit()
 
 	// Step 2: Load recipients from CSV.
 	recipients, err := loader.LoadRecipients("data/recipients.csv")
@@ -45,14 +46,19 @@ func main() {
 
 	fmt.Printf("Loaded %d recipient(s).\n", len(recipients))
 	fmt.Printf("Retry config: max %d attempts, %v delay.\n", retryCfg.MaxAttempts, retryCfg.Delay)
+	fmt.Printf("Rate limit: %.0f email(s) per second.\n", emailsPerSecond)
 
-	// Step 3: Create channel and produce jobs.
+	// Step 3: Create shared rate limiter.
+	limiter := dispatcher.NewRateLimiter(emailsPerSecond)
+	defer limiter.Stop()
+
+	// Step 4: Create channel and produce jobs.
 	jobs := make(chan models.EmailJob, len(recipients))
 	go dispatcher.Produce(recipients, jobs, subject, body)
 
-	// Step 4: Start worker pool and wait for completion.
+	// Step 5: Start worker pool and wait for completion.
 	fmt.Printf("Starting %d workers...\n\n", workerCount)
-	dispatcher.StartWorkers(jobs, workerCount, cfg, retryCfg)
+	dispatcher.StartWorkers(jobs, workerCount, cfg, retryCfg, limiter)
 
 	fmt.Println("\nAll jobs processed.")
 }
@@ -79,4 +85,18 @@ func loadRetryConfig() dispatcher.RetryConfig {
 		MaxAttempts: maxAttempts,
 		Delay:       time.Duration(delaySec) * time.Second,
 	}
+}
+
+// loadRateLimit reads the EMAILS_PER_SECOND setting from the environment.
+// Defaults to 1 if not set or invalid.
+func loadRateLimit() float64 {
+	rate := 1.0
+
+	if v := os.Getenv("EMAILS_PER_SECOND"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+			rate = n
+		}
+	}
+
+	return rate
 }
