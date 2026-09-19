@@ -2,4 +2,4 @@ module github.com/guptakartike/email-dispatcher
 
 go 1.25.5
 
-require github.com/joho/godotenv v1.5.1 // indirect
+require github.com/joho/godotenv v1.5.1
