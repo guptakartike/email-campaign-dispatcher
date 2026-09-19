@@ -1,66 +1,77 @@
-# 📧 Email Dispatcher
+# 📧 Email Campaign Manager (Email Dispatcher)
 
-A high-throughput, concurrent email campaign delivery system built in Go. Reads recipients from a CSV file, constructs personalized emails, and dispatches them through a pool of concurrent workers via SMTP — with AWS SES integration planned.
+A high-throughput, concurrent email campaign delivery system built in Go. Reads recipients from a CSV file, constructs personalized email jobs, and dispatches them through a configurable worker pool using Go's native concurrency primitives (goroutines, channels, and atomic synchronization) — featuring a shared token-bucket rate limiter, configurable retry system with backoff, swappable sender interface, and an integrated performance benchmark suite.
 
 ---
 
 ## Overview
 
-Email Dispatcher solves the problem of **sending personalized bulk emails efficiently and reliably**. Instead of sending emails sequentially (which is slow and fragile), it uses Go's native concurrency primitives — goroutines, channels, and a worker pool — to dispatch emails in parallel with automatic retry on failure.
+Sending bulk email sequentially is slow and vulnerable to rate-limiting and intermittent network failures. The Email Campaign Manager provides a robust **Producer → Channel → Worker Pool → Rate Limiter & Retry → Sender** architecture that delivers emails in parallel while strictly adhering to external SMTP sending quotas.
 
 ### Key Features
 
-| Feature | Status |
-|---------|--------|
-| CSV recipient loading with validation | ✅ Implemented |
-| Recipient data model (`Name`, `Email`) | ✅ Implemented |
-| SMTP email sending with `PlainAuth` | 🔧 Scaffolded |
-| `{{name}}` template substitution | 🔧 Scaffolded |
-| Concurrent worker pool (goroutines + channels) | 🔧 Scaffolded |
-| Retry with exponential backoff (3 attempts) | 🔧 Scaffolded |
-| Send/fail summary reporting | 🔧 Scaffolded |
-| AWS SES integration | 📋 Planned |
-| Rate limiting | 📋 Planned |
-| Graceful shutdown | 📋 Planned |
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **Flexible CSV Recipient Loader** | ✅ Implemented | Automatically maps `email` and `name` columns regardless of header order |
+| **Data Models** | ✅ Implemented | `Recipient` and `EmailJob` structures with personalization metadata |
+| **Producer & Channel Pipeline** | ✅ Implemented | Non-blocking producer pushing jobs onto a buffered channel |
+| **Concurrent Worker Pool** | ✅ Implemented | Configurable number of worker goroutines coordinated via `sync.WaitGroup` |
+| **Shared Rate Limiter** | ✅ Implemented | Concurrency-safe token-bucket ticker shared across all workers |
+| **Resilient Retry Mechanism** | ✅ Implemented | Independent per-worker retries with configurable delay and max attempts |
+| **Swappable Sender Interface** | ✅ Implemented | `Sender` interface decoupling delivery logic from worker dispatching |
+| **Production SMTP Sender** | ✅ Implemented | `net/smtp` delivery with RFC 5322 formatting and template substitution |
+| **Performance Benchmark Suite** | ✅ Implemented | Standalone benchmark (`cmd/benchmark`) with `MockSender` |
+| **AWS SES Backend** | 📋 Planned | Swappable SES backend via AWS SDK v2 |
+| **Graceful OS Signal Shutdown** | 📋 Planned | `SIGINT`/`SIGTERM` context cancellation for in-flight jobs |
 
 ---
 
-## Architecture Overview
+## System Architecture
 
 ```mermaid
-graph LR
-    CSV["📄 CSV File"] --> Loader["CSV Loader"]
-    Loader --> Producer["Producer<br/>(main.go)"]
-    Producer -->|"Job{}"| Channel["jobs channel"]
-    Channel --> W1["Worker 1"]
-    Channel --> W2["Worker 2"]
-    Channel --> WN["Worker N"]
-    W1 & W2 & WN --> SMTP["SMTP / SES"]
-    W1 & W2 & WN -->|"Result{}"| Results["results channel"]
-    Results --> Producer
+graph TD
+    CSV["📄 recipients.csv"] --> Loader["CSV Loader<br/>(Flexible Header Mapping)"]
+    Loader --> Recs["[]models.Recipient"]
+    Recs --> Producer["Producer<br/>(dispatcher.Produce)"]
+    Producer -->|"EmailJob{Recipient, Subject, Body}"| Channel["Buffered jobs Channel"]
+    
+    subgraph WorkerPool["Concurrent Worker Pool"]
+        W1["Worker 1"]
+        W2["Worker 2"]
+        WN["Worker N"]
+    end
+    
+    Channel --> W1 & W2 & WN
+    
+    subgraph Regulation["Throughput & Reliability"]
+        Limiter["Shared RateLimiter<br/>(time.Ticker token bucket)"]
+        Retry["Retry System<br/>(MaxAttempts, Delay)"]
+    end
+    
+    W1 & W2 & WN <--> Limiter
+    W1 & W2 & WN <--> Retry
+    
+    subgraph SenderAbstraction["Delivery Layer (Sender Interface)"]
+        SMTPSender["SMTPSender<br/>(Production SMTP)"]
+        MockSender["MockSender<br/>(Benchmark & Testing)"]
+    end
+    
+    Retry --> SMTPSender & MockSender
+    SMTPSender --> Mailtrap["External SMTP / Mailtrap"]
 ```
-
-The system follows a **Producer → Channel → Worker Pool → Sender** pipeline:
-
-1. **CSV Loader** parses recipients into typed structs.
-2. **Producer** (main goroutine) creates `Job` structs and pushes them onto a buffered channel.
-3. **Worker Pool** — N goroutines pull jobs from the channel and send emails concurrently.
-4. **Results** flow back through a results channel for summary reporting.
-
-> See [ARCHITECTURE.md](ARCHITECTURE.md) for full details, sequence diagrams, and concurrency design.
 
 ---
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|------------|
-| Language | Go 1.25+ |
-| CSV Parsing | `encoding/csv` (stdlib) |
-| SMTP | `net/smtp` (stdlib) |
-| Concurrency | Goroutines, Channels, `sync.WaitGroup` |
-| Configuration | `.env` file via `godotenv` |
-| Email Provider | SMTP (current), AWS SES (planned) |
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| **Language** | Go 1.25+ | Modern standard Go idioms |
+| **CSV Parsing** | `encoding/csv` | Standard library CSV parsing with dynamic column indexing |
+| **SMTP Delivery** | `net/smtp` | RFC 5322 plain text formatting with `PlainAuth` |
+| **Concurrency** | Goroutines, Channels, `sync.WaitGroup`, `sync/atomic` | Concurrency-safe job distribution and execution telemetry |
+| **Rate Limiting** | `time.Ticker` | Token-bucket rate limiter shared across concurrent workers |
+| **Configuration** | `github.com/joho/godotenv` | `.env` file loader with environment fallback defaults |
 
 ---
 
@@ -69,208 +80,145 @@ The system follows a **Producer → Channel → Worker Pool → Sender** pipelin
 ```
 email-dispatcher/
 ├── cmd/
-│   └── main.go                  # Entry point — orchestrator / producer
+│   ├── main.go                  # CLI entry point — orchestrates pipeline
+│   └── benchmark/
+│       └── main.go              # Standalone performance benchmark suite
 ├── data/
-│   └── recipients.csv           # Recipient list (email, name)
+│   └── recipients.csv           # Recipient list (auto-maps name, email)
+├── docs/
+│   ├── ARCHITECTURE.md          # Detailed architecture & concurrency design
+│   ├── PLANNING.md              # Phased development history & plan
+│   └── ROADMAP.md               # Implementation status & future phases
 ├── internal/
 │   ├── dispatcher/
-│   │   └── worker.go            # Worker pool — Job, Result, StartWorker()
+│   │   ├── producer.go          # Job producer — Produce()
+│   │   ├── ratelimiter.go       # Shared token-bucket rate limiter
+│   │   └── worker.go            # Worker pool, retry logic & telemetry
 │   ├── loader/
-│   │   ├── csv.go               # CSV parser — LoadRecipients()
-│   │   └── csv_test.go          # Loader unit tests
+│   │   └── csv.go               # CSV loader with flexible header mapping
 │   ├── models/
+│   │   ├── job.go               # EmailJob struct
 │   │   └── recipients.go        # Recipient struct
 │   └── sender/
-│       └── smtp.go              # SMTP sender — Send(), EmailConfig
-├── .env                         # SMTP/SES credentials (git-ignored)
+│       ├── mock.go              # MockSender for zero-latency/I/O benchmarks
+│       ├── sender.go            # Sender interface & SMTPSender adapter
+│       └── smtp.go              # Core SMTP delivery function
+├── .env                         # Configuration variables (git-ignored)
 ├── .gitignore
 ├── go.mod
 ├── go.sum
-├── ARCHITECTURE.md              # System architecture documentation
-├── PLANNING.md                  # Phased development plan
-├── ROADMAP.md                   # Implementation roadmap
-└── README.md                    # This file
-```
-
----
-
-## How the System Works
-
-### 1. Load Recipients
-```
-recipients.csv → LoadRecipients() → []models.Recipient
-```
-The CSV loader reads the file, validates the header and each row, and returns a slice of `Recipient` structs.
-
-### 2. Produce Jobs
-```
-[]Recipient → main.go → Job{Recipient, Subject, Body} → jobs channel
-```
-The main goroutine creates a `Job` for each recipient and pushes it onto the buffered `jobs` channel.
-
-### 3. Dispatch via Worker Pool
-```
-jobs channel → Worker goroutines → sender.Send() → SMTP server
-```
-N worker goroutines pull jobs from the shared channel. Each worker calls `Send()` with up to 3 retry attempts (exponential backoff).
-
-### 4. Collect Results
-```
-results channel → main.go → "Sent=X Failed=Y"
-```
-Each worker writes a `Result` to the results channel. After all workers finish, the main goroutine tallies successes and failures.
-
----
-
-## Setup Instructions
-
-### Prerequisites
-
-- [Go 1.25+](https://go.dev/dl/) installed
-- An SMTP server or AWS SES account for sending emails
-
-### Clone
-
-```bash
-git clone https://github.com/guptakartike/email-dispatcher.git
-cd email-dispatcher
-```
-
-### Configure
-
-Create a `.env` file in the project root:
-
-```env
-SMTP_HOST=email-smtp.ap-south-1.amazonaws.com
-SMTP_PORT=587
-SMTP_USER=your_smtp_username
-SMTP_PASS=your_smtp_password
-SENDER_EMAIL=you@example.com
-```
-
-### Install Dependencies
-
-```bash
-go mod tidy
+└── README.md
 ```
 
 ---
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SMTP_HOST` | Yes | SMTP server hostname |
-| `SMTP_PORT` | Yes | SMTP server port (typically `587` for TLS) |
-| `SMTP_USER` | Yes | SMTP authentication username |
-| `SMTP_PASS` | Yes | SMTP authentication password |
-| `SENDER_EMAIL` | Yes | "From" email address |
+Configure your credentials and pipeline parameters in `.env`:
+
+```env
+# SMTP Configuration
+SMTP_HOST=sandbox.smtp.mailtrap.io
+SMTP_PORT=2525
+SMTP_USERNAME=your_username
+SMTP_PASSWORD=your_password
+
+# Sender Details
+FROM_EMAIL=sender@example.com
+FROM_NAME="Campaign Team"
+
+# Retry Policy
+MAX_RETRIES=3
+RETRY_DELAY_SECONDS=2
+
+# Rate Limiter
+EMAILS_PER_SECOND=1
+```
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SMTP_HOST` | Yes | — | SMTP server hostname |
+| `SMTP_PORT` | Yes | `2525` | SMTP port (e.g. `2525`, `587`) |
+| `SMTP_USERNAME` | Yes | — | SMTP authentication username |
+| `SMTP_PASSWORD` | Yes | — | SMTP authentication password |
+| `FROM_EMAIL` | Yes | — | Sender email address |
+| `FROM_NAME` | No | `""` | Display name of the sender |
+| `MAX_RETRIES` | No | `3` | Maximum attempts per email before permanent failure |
+| `RETRY_DELAY_SECONDS` | No | `2` | Delay between retry attempts (seconds) |
+| `EMAILS_PER_SECOND` | No | `1.0` | Global sending rate limit across all workers |
 
 ---
 
 ## How to Run
 
-### Run the program
+### 1. Run the Campaign Dispatcher
+
+Executes the full production pipeline (CSV load → producer → worker pool → rate limiter → retries → SMTP delivery):
 
 ```bash
 go run ./cmd
 ```
 
-**Current output** (Step 1 — CSV loader only):
-```
-Loaded 1 recipient(s):
-  1. kartike <kartikegupta01@gmail.com>
+**Example output:**
+```text
+Loaded 6 recipient(s).
+Retry config: max 3 attempts, 2s delay.
+Rate limit: 1 email(s) per second.
+Starting 5 workers...
+
+[Worker 1] Sent to Kartike <guptakartike25.af@gmail.com>
+[Worker 2] Sent to Alice <alice@example.com>
+[Worker 3] Sent to Bob <bob@example.com>
+[Worker 4] Sent to Charlie <charlie@example.com>
+[Worker 5] Sent to Diana <diana@example.com>
+
+All jobs processed.
 ```
 
-### Run tests
+### 2. Run the Performance Benchmark Suite
+
+Runs performance benchmarks using an in-memory `MockSender` to measure worker pool throughput without hitting external SMTP provider rate limits:
 
 ```bash
-go test ./...
+go run ./cmd/benchmark
 ```
 
-### Run tests with race detection
-
-```bash
-go test -race ./...
-```
-
-### Format code
-
-```bash
-gofmt -w .
-```
+**Measured Benchmark Highlights:**
+- **Raw In-Memory Throughput:** Up to **13.1 million emails/sec** (1,000 recipients, Rate Limiter bypassed).
+- **Concurrent I/O Scaling (2ms simulated latency):**
+  - 1 worker: `441 emails/sec`
+  - 5 workers: `2,205 emails/sec` (5.0x speedup)
+  - 10 workers: `4,407 emails/sec` (10.0x speedup)
+  - 20 workers: `8,796 emails/sec` (19.9x speedup)
+- **Rate-Limited Constraint:** With `EMAILS_PER_SECOND=100`, throughput across 1, 5, 10, and 20 workers was strictly held to exactly `100 emails/sec` (5.00s for 500 emails).
 
 ---
 
-## CSV Format
+## CSV Recipient Format
 
-The recipient CSV file must have a header row with `email` and `name` columns:
+The CSV loader supports both `name,email` and `email,name` header layouts:
 
 ```csv
-email,name
-alice@example.com,Alice
-bob@example.com,Bob
-charlie@example.com,Charlie
+name,email
+Alice,alice@example.com
+Bob,bob@example.com
+Charlie,charlie@example.com
 ```
 
-- **Column 1:** Email address
-- **Column 2:** Recipient name (used for `{{name}}` template substitution)
-- Rows with fewer than 2 columns will produce an error.
+The loader automatically trims whitespace and maps the columns by header name. If custom headers are used, it falls back to column 0 for email and column 1 for name.
 
 ---
 
-## Current Implementation Status
+## Verification and Formatting
 
-| Component | File | Status |
-|-----------|------|--------|
-| Recipient model | `internal/models/recipients.go` | ✅ Complete |
-| CSV loader | `internal/loader/csv.go` | ✅ Complete |
-| Loader tests | `internal/loader/csv_test.go` | ✅ Complete (5 tests) |
-| Main (loader test) | `cmd/main.go` | ✅ Complete |
-| SMTP sender | `internal/sender/smtp.go` | 🔧 Scaffolded (not wired) |
-| Worker pool | `internal/dispatcher/worker.go` | 🔧 Scaffolded (not wired) |
-| AWS SES sender | — | 📋 Planned |
-| Rate limiting | — | 📋 Planned |
+Format all Go files according to standard Go style:
 
-> **Currently active:** Phase 1 (CSV Loading) is complete. The system loads and displays recipients but does not yet send emails.
+```bash
+gofmt -w ./cmd/ ./internal/
+```
 
----
+Verify that all packages compile:
 
-## Roadmap
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | CSV recipient loading | ✅ Complete |
-| 2 | Email job model | ⬜ Next |
-| 3 | Producer (main.go orchestration) | ⬜ Planned |
-| 4 | Channel pipeline | ⬜ Planned |
-| 5 | Worker pool | ⬜ Planned |
-| 6 | SMTP sender | ⬜ Planned |
-| 7 | AWS SES integration | ⬜ Planned |
-| 8 | Error handling & retries | ⬜ Planned |
-| 9 | Concurrency & rate limiting | ⬜ Planned |
-| 10 | Testing | ⬜ Planned |
-| 11 | Production improvements | ⬜ Planned |
-
-> See [ROADMAP.md](ROADMAP.md) for detailed breakdowns and [PLANNING.md](PLANNING.md) for implementation specifics.
-
----
-
-## Future Improvements
-
-- **AWS SES** as a first-class delivery backend with IAM auth
-- **Rate limiting** to respect provider quotas (e.g., SES: 14 emails/sec)
-- **Graceful shutdown** on `SIGINT`/`SIGTERM`
-- **Structured logging** with `log/slog`
-- **HTML emails** with MIME multipart support
-- **Dry-run mode** for testing without sending
-- **Docker** containerization
-- **CI/CD** pipeline with GitHub Actions
-- **Email validation** and deduplication in the CSV loader
-- **Campaign progress bar** with real-time status
-
----
-
-## License
-
-This project is for educational and personal use.
+```bash
+go build ./...
+```
